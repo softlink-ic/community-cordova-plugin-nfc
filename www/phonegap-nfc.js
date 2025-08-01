@@ -582,7 +582,34 @@ var nfc = {
 
     disableReaderMode: function(successCallback, errorCallback) {
         cordova.exec(successCallback, errorCallback, 'NfcPlugin', 'disableReaderMode', []);
-    }
+    },
+
+    // iOS AFI Function
+    writeAfi: function (afiValue, flags, win, fail) {
+        const options = {
+            afi: afiValue,
+            flags: flags
+        }
+        if(cordova.platformId === 'ios') {
+            cordova.exec(win, fail, 'NfcPlugin', 'writeAfi', [options]);
+        } else {
+            throw "This is an iOS only function";
+        }
+    },
+
+    // iOS Arbitrary command function
+    customCommand: function (commandCode, flags, parameters, win, fail) {
+        const options = {
+            commandCode: commandCode,
+            flags: flags,
+            parameters: parameters
+        }
+        if(cordova.platformId === 'ios') {
+            cordova.exec(win, fail, 'NfcPlugin', 'customCommand', [options]);
+        } else {
+            throw "This is an iOS only function";
+        }
+    },
 
 };
 

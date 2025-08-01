@@ -624,4 +624,32 @@
     return NSLocalizedString(key, comment: "") != key ? NSLocalizedString(key, comment: "") : defaultValue;
 }
 
+- (void) writeAfi:(CDVInvokedUrlCommand*)command {
+  	NSLog(@"writeAfi");
+
+    NSArray<NSDictionary *> *options = [command argumentAtIndex:0];
+
+    self.shouldUseTagReaderSession = YES;
+    self.sendCallbackOnSessionStart = NO;
+    self.returnTagInCallback = YES;
+    self.returnTagInEvent = NO;
+    if (![session isKindOfClass:[NFCTagReaderSession class]]) {
+        [self closeSession:session withError:@"Invalid session type"];
+        return;
+    }
+	
+    NFCTagReaderSession *tagSession = (NFCTagReaderSession *)session;
+    id<NFCISO15693Tag> iso15693Tag = [tagSession.connectedTag asNFCISO15693Tag];
+
+    if (!iso15693Tag) {
+        [self closeSession:session withError:@"Tag is not ISO15693 compatible"];
+        return;
+    }
+
+    uint8_t afi = [options objectForKey:@"afi"];
+	NFCISO15693RequestFlag flags = [options objectForKey:@"flags"];
+
+    [iso15693Tag writeAFIWithRequestFlag:flags afi:afi completionHandler:nil];
+}
+
 @end
