@@ -586,12 +586,8 @@ var nfc = {
 
     // iOS AFI Function
     writeAfi: function (afiValue, flags, win, fail) {
-        const options = {
-            afi: afiValue,
-            flags: flags
-        }
         if(cordova.platformId === 'ios') {
-            cordova.exec(win, fail, 'NfcPlugin', 'writeAfi', [options]);
+            cordova.exec(win, fail, 'NfcPlugin', 'writeAfi', [afiValue, flags]);
         } else {
             throw "This is an iOS only function";
         }

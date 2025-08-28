@@ -35,6 +35,9 @@
 // Internal implementation
 - (void)channel:(CDVInvokedUrlCommand *)command;
 
+// Security functions
+- (void)writeAfi:(CDVInvokedUrlCommand *)command;
+
 @end
 
 #endif

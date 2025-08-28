@@ -199,6 +199,45 @@
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
 
+
+- (void)writeAfi:(CDVInvokedUrlCommand *)command {
+    NSLog(@"writeAfi");
+    NSNumber *afiNum = [command argumentAtIndex:0 withDefault:@(0) andClass:[NSNumber class]];
+    uint8_t afiByte = [afiNum unsignedCharValue];
+    NSNumber *flagNums = [command argumentAtIndex:1 withDefault:@(0) andClass:[NSNumber class]];
+    uint8_t requestFlag = [flagNums unsignedCharValue];
+    
+    if(![self.nfcSession isKindOfClass:[NFCTagReaderSession class]]) {
+        [self closeSession:self.nfcSession withError:@"Invalid session type"];
+        return;
+    }
+    
+    NSLog(@"There %s a session, and its ready state is %s", self.nfcSession ? "is" : "isn't", self.nfcSession.ready ? "yes" : "no");
+    
+    NFCTagReaderSession *tagSession = (NFCTagReaderSession *)self.nfcSession;
+    id<NFCISO15693Tag> tag = [[tagSession connectedTag] asNFCISO15693Tag];
+    if (!tag || !tag.isAvailable) {
+        NSLog(@"No Tag Available");
+        [self closeSession:self.nfcSession withError:@"Tag is not ISO15693 compatible"];
+        return;
+    }
+    
+    __weak NfcPlugin *weakSelf = self;
+    
+    [tag writeAFIWithRequestFlag:NFCISO15693RequestFlagHighDataRate
+                             afi:afiByte
+               completionHandler:^(NSError * _Nullable error) {
+        CDVPluginResult *pluginResult;
+        if(error) {
+            NSLog(@"Encountered Error %ld with message %@, %@", (long)error.code, error.localizedDescription, error.localizedFailureReason);
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.localizedDescription];
+        } else {
+            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+        }
+        [weakSelf.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+    }];
+}
+
 #pragma mark - NFCNDEFReaderSessionDelegate
 
 // iOS 11 & 12
@@ -274,6 +313,7 @@
     id<NFCTag> tag = [tags firstObject];
     NSMutableDictionary *tagMetaData = [self getTagInfo:tag];
     id<NFCNDEFTag> ndefTag = (id<NFCNDEFTag>)tag;
+    id<NFCISO15693Tag> nfcTag = (id<NFCISO15693Tag>)tag;
     
     [session connectToTag:tag completionHandler:^(NSError * _Nullable error) {
         if (error) {
@@ -281,8 +321,12 @@
             [self closeSession:session withError:[self localizeString:@"NFCErrorTagConnection" defaultValue:@"Error connecting to tag."]];
             return;
         }
-
-        [self processNDEFTag:session tag:ndefTag metaData:tagMetaData];
+        
+        if (tag.type == NFCTagTypeISO15693) {
+            [self processNFCVTag:session tag:nfcTag metaData:tagMetaData];
+        } else {
+            [self processNDEFTag:session tag:ndefTag metaData:tagMetaData];
+        }
     }];
 }
 
@@ -320,6 +364,7 @@
         
     } else if (@available(iOS 11.0, *)) {
         NSLog(@"iOS < 13, using NFCNDEFReaderSession");
+        self.nfcSession = [[NFCNDEFReaderSession alloc]initWithDelegate:self queue:nil invalidateAfterFirstRead:TRUE];
         self.nfcSession = [[NFCNDEFReaderSession alloc]initWithDelegate:self queue:nil invalidateAfterFirstRead:TRUE];
         sessionCallbackId = [command.callbackId copy];
         self.nfcSession.alertMessage = [self localizeString:@"NFCHoldNearTag" defaultValue:@"Hold near NFC tag to scan."];
@@ -420,6 +465,43 @@
         default:
             [self closeSession:session withError:[self localizeString:@"NFCUnknownNdefTag" defaultValue:@"Unknown NDEF tag status."]];
     }
+}
+
+#pragma mark - NFCV Tag Reading
+
+- (void) processNFCVTag:(NFCTagReaderSession *)session tag:(id<NFCISO15693Tag>)tag metaData:(NSMutableDictionary * _Nonnull)metaData API_AVAILABLE(ios(13.0)) {
+    
+    [tag getSystemInfoWithRequestFlag:(NFCISO15693RequestFlagHighDataRate) completionHandler:^(NSInteger dsfid, NSInteger afi, NSInteger blockSize, NSInteger blockCount, NSInteger icReference, NSError * _Nullable error) {
+        if(!error) {
+            // For ISO15693 tags, this prints "DSFId: 0, AFI: 0, Block size: 4, Block count: 28, IC Reference: 1"
+            NSLog(@"DSFId: %ld, AFI: %ld, Block size: %ld, Block count: %ld, IC Refence: %ld", (long)dsfid, afi, blockSize, blockCount, icReference);
+            // Read all blocks
+            NSRange blockRange = NSMakeRange(0, blockCount);
+            
+            [tag readMultipleBlocksWithRequestFlags:NFCISO15693RequestFlagHighDataRate blockRange:blockRange completionHandler:^(NSArray * _Nonnull dataBlocks, NSError * _Nullable error) {
+                NSMutableData *response = [NSMutableData data];
+                for(NSData *blockData in dataBlocks) {
+                    [response appendData:blockData];
+                }
+                
+                if(response.length > 0) {
+                    NSData *rawData = [response subdataWithRange:NSMakeRange(0, (response.length - 1))];
+                    NSLog(@"Received data: %@", rawData);
+                    
+                    // Parse data into an array
+                    metaData[@"nfcPayload"] = rawData;
+                }
+                
+                session.alertMessage = @"Tag successfully read.";
+                [self fireTagEvent:metaData];
+                [self closeSession:session];
+                }];
+        } else {
+            NSLog(@"%@", error);
+            [self closeSession:session withError:@"Read Failed."];
+            return;
+        }
+        }];
 }
 
 #pragma mark - Tag Reader Helper Functions
@@ -556,6 +638,12 @@
     if (metaData) {
         [dictionary setDictionary:metaData];
     }
+    
+    //Save the NFC payload (separate to Ndef record
+    NSData *nfcPayload = [dictionary objectForKey:@"nfcPayload"];
+    if (nfcPayload) {
+        dictionary[@"nfcPayload"] = [self uint8ArrayFromNSData:nfcPayload];
+    }
 
     // convert uid from NSData to a uint8_t array
     NSData *uid = [dictionary objectForKey:@"id"];
@@ -622,34 +710,6 @@
 
 - (NSString*) localizeString:(NSString *)key defaultValue:(NSString*) defaultValue {
     return NSLocalizedString(key, comment: "") != key ? NSLocalizedString(key, comment: "") : defaultValue;
-}
-
-- (void) writeAfi:(CDVInvokedUrlCommand*)command {
-  	NSLog(@"writeAfi");
-
-    NSArray<NSDictionary *> *options = [command argumentAtIndex:0];
-
-    self.shouldUseTagReaderSession = YES;
-    self.sendCallbackOnSessionStart = NO;
-    self.returnTagInCallback = YES;
-    self.returnTagInEvent = NO;
-    if (![session isKindOfClass:[NFCTagReaderSession class]]) {
-        [self closeSession:session withError:@"Invalid session type"];
-        return;
-    }
-	
-    NFCTagReaderSession *tagSession = (NFCTagReaderSession *)session;
-    id<NFCISO15693Tag> iso15693Tag = [tagSession.connectedTag asNFCISO15693Tag];
-
-    if (!iso15693Tag) {
-        [self closeSession:session withError:@"Tag is not ISO15693 compatible"];
-        return;
-    }
-
-    uint8_t afi = [options objectForKey:@"afi"];
-	NFCISO15693RequestFlag flags = [options objectForKey:@"flags"];
-
-    [iso15693Tag writeAFIWithRequestFlag:flags afi:afi completionHandler:nil];
 }
 
 @end
