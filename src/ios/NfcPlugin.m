@@ -472,11 +472,12 @@
 - (void) processNFCVTag:(NFCTagReaderSession *)session tag:(id<NFCISO15693Tag>)tag metaData:(NSMutableDictionary * _Nonnull)metaData API_AVAILABLE(ios(13.0)) {
     
     [tag getSystemInfoWithRequestFlag:(NFCISO15693RequestFlagHighDataRate) completionHandler:^(NSInteger dsfid, NSInteger afi, NSInteger blockSize, NSInteger blockCount, NSInteger icReference, NSError * _Nullable error) {
+        NSUInteger maxBlockCount = (NSUInteger)0x40; // There's difficulties reading more than this in one go, so limit it (TODO: Better fix for this)
         if(!error) {
             // For ISO15693 tags, this prints "DSFId: 0, AFI: 0, Block size: 4, Block count: 28, IC Reference: 1"
             NSLog(@"DSFId: %ld, AFI: %ld, Block size: %ld, Block count: %ld, IC Refence: %ld", (long)dsfid, afi, blockSize, blockCount, icReference);
             // Read all blocks
-            NSRange blockRange = NSMakeRange(0, blockCount);
+            NSRange blockRange = NSMakeRange(0, blockCount < maxBlockCount ? blockCount : maxBlockCount);
             
             [tag readMultipleBlocksWithRequestFlags:NFCISO15693RequestFlagHighDataRate blockRange:blockRange completionHandler:^(NSArray * _Nonnull dataBlocks, NSError * _Nullable error) {
                 NSMutableData *response = [NSMutableData data];
