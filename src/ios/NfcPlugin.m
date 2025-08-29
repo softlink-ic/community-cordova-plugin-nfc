@@ -212,8 +212,6 @@
         return;
     }
     
-    NSLog(@"There %s a session, and its ready state is %s", self.nfcSession ? "is" : "isn't", self.nfcSession.ready ? "yes" : "no");
-    
     NFCTagReaderSession *tagSession = (NFCTagReaderSession *)self.nfcSession;
     id<NFCISO15693Tag> tag = [[tagSession connectedTag] asNFCISO15693Tag];
     if (!tag || !tag.isAvailable) {
